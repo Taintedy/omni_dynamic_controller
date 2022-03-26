@@ -63,6 +63,16 @@ class ControllerNode(object):
         self.y_err_int = 0
         self.theta_err_int = 0
 
+        # Setting initial current outputs
+        self.i_out_0 = 0
+        self.i_out_1 = 0
+        self.i_out_2 = 0
+
+        # Setting initial speed outputs
+        self.v = 0
+        self.vn = 0
+        self.w = 0
+
         # Initialize augmented LQR
         self.K_fsfb = np.genfromtxt('K_fsf.csv', delimiter=',')
         self.K_int = np.genfromtxt('K_int.csv', delimiter=',')
@@ -76,23 +86,23 @@ class ControllerNode(object):
         Control_FSFB_Part = self.K_fsfb @ self.X
         Control_Vector = Control_Int_Part - Control_FSFB_Part
 
+        self.i_out_0 = Control_Vector[0, 0]
+        self.i_out_1 = Control_Vector[0, 0]
+        self.i_out_2 = Control_Vector[0, 0]
+
         # Publish data to STM
         control_string = "code 1" + "code 1" + "%s" % (Control_Vector.T[0])
-        self.pub_stm_command(control_string)
+        self.pub_stm_command.publish(control_string)
 
     def callback_response(self, data):
         rospy.logwarn(data.data)
         # Subscribe to STM data
         # Kinematics Data Parse
-        #self.v =            # Forward Speed V
-        #self.vn =           # Lateral Speed Vn
-        #self.w =            # Angular Speed W
-        # Motor Currents Data Parse
-        #self.i_out_0 =
-        #self.i_out_1 =
-        #self.i_out_2 =
+        speed_vals = [float(token) for token in data.data]
+        self.v = speed_vals[1]           # Forward Speed V
+        self.vn = speed_vals[2]          # Lateral Speed Vn
+        self.w = speed_vals[3]           # Angular Speed W
 
-        # Publish data to STM
 
     def tcallback_speed(self, event):
         data = "0 9"
