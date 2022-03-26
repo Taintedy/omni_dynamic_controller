@@ -13,6 +13,7 @@
             <param name="is_publish_tf" value="false"/>
         </node>
        <include file="$(find eurobot_localization)/launch/localization_secondary_robot.launch"/>
+        <node name="controller_node" pkg="omni_dynamic_controller" type="controller_node.py" output="screen" respawn="true" />
     </group>
 </launch>
 
