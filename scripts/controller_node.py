@@ -9,12 +9,9 @@ from tf.transformations import euler_from_quaternion
 RATE = 100
 
 
-
-
-
 def wrap_angle(angle):
-
     return (angle + np.pi) % (2 * np.pi) - np.pi
+
 
 class ControllerNode(object):
     def __init__(self):
@@ -22,32 +19,38 @@ class ControllerNode(object):
 
         self.pub_stm_command = rospy.Publisher("/secondary_robot/stm/command", String, queue_size=1)
         rospy.Subscriber("/secondary_robot/stm/response", String, self.callback_response, queue_size=1)
-        rospy.Subscriber("/secondary_robot/filtered_coords", PoseWithCovarianceStamped, self.callback_localization, queue_size=1)
+        rospy.Subscriber("/secondary_robot/filtered_coords", PoseWithCovarianceStamped, self.callback_localization,
+                         queue_size=1)
         self.timer = rospy.Timer(rospy.Duration(1. / RATE), self.tcallback_speed)
 
+        # Creating trajectory
+        # keypoints for the trajectory
         poses = np.array([[1, 0, 0],
                           [1, 0.5, np.pi / 2],
                           [0, 0, np.pi]])
+        # creating trajectory [[x], [y], [theta]]
         x = np.array([0])
         y = np.array([0])
         theta = np.array([0])
+        num_of_points = 100
         for pose in poses:
-            x_lin = np.linspace(x[-1], pose[0], 100)
-            y_lin = np.linspace(y[-1], pose[1], 100)
-            theta_lin = np.linspace(theta[-1], pose[2], 100)
+            x_lin = np.linspace(x[-1], pose[0], num_of_points)
+            y_lin = np.linspace(y[-1], pose[1], num_of_points)
+            theta_lin = np.linspace(theta[-1], pose[2], num_of_points)
 
             x = np.concatenate([x, x_lin])
             y = np.concatenate([y, y_lin])
             theta = np.concatenate([theta, theta_lin])
 
         self.trajectory = np.vstack([x, y, theta])
+
+        # creating delta array [[dx, dy, dtheta]]
         delta = []
-
         for i in range(self.trajectory.shape[1] - 1):
-            delta.append(np.array([self.trajectory[0, i + 1] - self.trajectory[0, i], self.trajectory[1, i + 1] - self.trajectory[1, i],
-                                   self.trajectory[2, i + 1] - self.trajectory[2, i]]))
+            delta.append(np.array(
+                [self.trajectory[0, i + 1] - self.trajectory[0, i], self.trajectory[1, i + 1] - self.trajectory[1, i],
+                 self.trajectory[2, i + 1] - self.trajectory[2, i]]))
         self.deltas = np.array(delta)
-
 
         # Integrals initialization
         self.x_int = 0  # Возможно нужно перевести все в локальную систему координат либо изменить начальные условия на текущую координату
@@ -60,18 +63,18 @@ class ControllerNode(object):
         rospy.logwarn(data.data)
         # Subscribe to STM data
         # Kinematics Data Parse
-        #self.v =            # Forward Speed V
-        #self.vn =           # Lateral Speed Vn
-        #self.w =            # Angular Speed W
+        # self.v =            # Forward Speed V
+        # self.vn =           # Lateral Speed Vn
+        # self.w =            # Angular Speed W
         # Motor Currents Data Parse
-        #self.i_out_0 =
-        #self.i_out_1 =
-        #self.i_out_2 =
+        # self.i_out_0 =
+        # self.i_out_1 =
+        # self.i_out_2 =
 
         # Publish data to STM
-        #self.i_0 = # Control current for Motor_0
-        #self.i_1 = # Control current for Motor_1
-        #self.i_2 = # Control current for Motor_2
+        # self.i_0 = # Control current for Motor_0
+        # self.i_1 = # Control current for Motor_1
+        # self.i_2 = # Control current for Motor_2
 
     def tcallback_speed(self, event):
         data = "0 9"
@@ -92,16 +95,18 @@ class ControllerNode(object):
         # Localization Data Parse
         self.x = self.pose.pose.position.x  # Position X
         self.y = self.pose.pose.position.y  # Position Y
-        self.theta = self.angle             # Angle Theta
+        self.theta = self.angle  # Angle Theta
 
     def integrals(self):
         # Integrals Data
-        self.x_int += self.x                # Intergal of Position X
-        self.y_int += self.y                # Intergal of Position Y
-        self.theta_int += self.theta        # Intergal of Angle Theta
+        self.x_int += self.x  # Intergal of Position X
+        self.y_int += self.y  # Intergal of Position Y
+        self.theta_int += self.theta  # Intergal of Angle Theta
 
     def robot_state(self):
-        self.X = np.array([self.x, self.y, self.theta, self.v, self.vn, self.w, self.i_out_0, self.i_out_1, self.i_out_2, self.x_int, self.y_int, self.theta_int])
+        self.X = np.array(
+            [self.x, self.y, self.theta, self.v, self.vn, self.w, self.i_out_0, self.i_out_1, self.i_out_2, self.x_int,
+             self.y_int, self.theta_int])
 
 
 def shutdown():
