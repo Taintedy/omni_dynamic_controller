@@ -65,14 +65,18 @@ class ControllerNode(object):
 
     def integrals(self):
         # Integrals Data
-        self.x_int += self.x                # Intergal of Position X
-        self.y_int += self.y                # Intergal of Position Y
-        self.theta_int += self.theta        # Intergal of Angle Theta
+        self.x_err_int += self.x                # Intergal of Position X
+        self.y_err_int += self.y                # Intergal of Position Y
+        self.theta_err_int += self.theta        # Intergal of Angle Theta
 
     def robot_state(self):
+        # Defines robot state at each time step
         self.X = np.array([self.x, self.y, self.theta, self.v, self.vn, self.w, self.i_out_0, self.i_out_1, self.i_out_2, self.x_int, self.y_int, self.theta_int])
 
-
+    def deviation_errors(self):
+        #self.x_dev_err = 
+        #self.y_dev_err = 
+        #self.theta_dev_err =
 def shutdown():
     rospy.logwarn("Controller shutting down")
 
