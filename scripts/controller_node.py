@@ -6,8 +6,8 @@ from std_msgs.msg import String
 from geometry_msgs.msg import PoseWithCovarianceStamped
 from tf.transformations import euler_from_quaternion
 
-RATE = 100
-RATE_control = 100
+RATE = 50
+RATE_control = 50
 
 
 def wrap_angle(angle):
@@ -16,13 +16,8 @@ def wrap_angle(angle):
 
 class ControllerNode(object):
     def __init__(self):
-        self.robot_pose = np.zeros(4)
-
-        self.pub_stm_command = rospy.Publisher("/secondary_robot/stm/command", String, queue_size=1)
-        rospy.Subscriber("/secondary_robot/stm/response", String, self.callback_response, queue_size=1)
-        rospy.Subscriber("/secondary_robot/filtered_coords", PoseWithCovarianceStamped, self.callback_localization, queue_size=1)
-        self.timer = rospy.Timer(rospy.Duration(1. / RATE), self.tcallback_speed)
-        self.timer_control = rospy.Timer(rospy.Duration(1. / RATE_control), self.tcallback_control)
+        self.robot_pose = None
+        self.Int_Err = None
 
         # Creating trajectory
         # keypoints for the trajectory
@@ -54,51 +49,56 @@ class ControllerNode(object):
         self.deltas = np.array(delta)
 
         # Current goal
-        self.x_goal = 1
-        self.y_goal = 1
-        self.theta_goal = 1
+        self.x_goal = 0.1
+        self.y_goal = 0.1
+        self.theta_goal = 0.1
 
         # Integrals initialization
         self.x_err_int = 0  # Возможно нужно перевести все в локальную систему координат либо изменить начальные условия на текущую координату
         self.y_err_int = 0
         self.theta_err_int = 0
 
-        # Setting initial current outputs
-        self.i_out_0 = 0
-        self.i_out_1 = 0
-        self.i_out_2 = 0
-
         # Setting initial speed outputs
         self.v = 0
         self.vn = 0
         self.w = 0
 
+        # initial poses
+        self.x = 2.75              # Position X
+        self.y = 0.85              # Position Y
+        self.theta = 3.14          # Position Theta
+
         # Initialize augmented LQR
-        self.K_fsfb = np.genfromtxt('K_fsf.csv', delimiter=',')
-        self.K_int = np.genfromtxt('K_int.csv', delimiter=',')
+        self.K_fsfb = np.genfromtxt('/home/rpi2/catkin_ws/src/reset_22/omni_dynamic_controller/scripts/K_fsfb.csv', delimiter=',')
+        self.K_int = np.genfromtxt('/home/rpi2/catkin_ws/src/reset_22/omni_dynamic_controller/scripts/K_int.csv', delimiter=',')
+
+        self.pub_stm_command = rospy.Publisher("/secondary_robot/stm/command", String, queue_size=1)
+        rospy.Subscriber("/secondary_robot/stm/response", String, self.callback_response, queue_size=1)
+        rospy.Subscriber("/secondary_robot/filtered_coords", PoseWithCovarianceStamped, self.callback_localization,
+                         queue_size=1)
+        self.timer = rospy.Timer(rospy.Duration(1. / RATE), self.tcallback_speed)
+        self.timer_control = rospy.Timer(rospy.Duration(1. / RATE_control), self.tcallback_control, reset=True)
 
     def tcallback_control(self, event):
         # Defines robot state at each time step
-        self.X = np.array([self.x, self.y, self.theta, self.v, self.vn, self.w, self.i_out_0, self.i_out_1, self.i_out_2]).T
+        if self.Int_Err is not None:
+            self.X = np.array([self.x, self.y, self.theta, self.v, self.vn, self.w]).T
 
-        # Calculate control vector
-        Control_Int_Part = self.K_int @ self.Int_Err 
-        Control_FSFB_Part = self.K_fsfb @ self.X
-        Control_Vector = Control_Int_Part - Control_FSFB_Part
+            # Calculate control vector
+            Control_Int_Part = self.K_int @ self.Int_Err
+            Control_FSFB_Part = self.K_fsfb @ self.X
+            Control_Vector = Control_Int_Part - Control_FSFB_Part
 
-        self.i_out_0 = Control_Vector[0, 0]
-        self.i_out_1 = Control_Vector[0, 0]
-        self.i_out_2 = Control_Vector[0, 0]
-
-        # Publish data to STM
-        control_string = "code 1" + "code 1" + "%s" % (Control_Vector.T[0])
-        self.pub_stm_command.publish(control_string)
+            # Publish data to STM
+            control_string = "0" + " 50 " + "%f %f %f" % Control_Vector.T[0]
+            rospy.logwarn("control_string: %s" % control_string)
+            self.pub_stm_command.publish(control_string)
 
     def callback_response(self, data):
-        rospy.logwarn(data.data)
+        rospy.logwarn("speed data: %s" % data.data)
         # Subscribe to STM data
         # Kinematics Data Parse
-        speed_vals = [float(token) for token in data.data]
+        speed_vals = [float(token) for token in data.data.split()]
         self.v = speed_vals[1]           # Forward Speed V
         self.vn = speed_vals[2]          # Lateral Speed Vn
         self.w = speed_vals[3]           # Angular Speed W
@@ -114,12 +114,12 @@ class ControllerNode(object):
         angle = wrap_angle(euler_from_quaternion(q)[2] % (2 * np.pi))
         self.robot_pose = np.array(
             [data.header.stamp.to_sec(), data.pose.pose.position.x, data.pose.pose.position.y, wrap_angle(angle)])
-        rospy.logwarn(self.robot_pose)
+        rospy.logwarn("robot pose: %s" % self.robot_pose)
 
         # Localization Data Parse
-        self.x = self.pose.pose.position.x  # Position X
-        self.y = self.pose.pose.position.y  # Position Y
-        self.theta = self.angle             # Angle Theta
+        self.x = self.robot_pose[1]         # Position X
+        self.y = self.robot_pose[2]         # Position Y
+        self.theta = self.robot_pose[3]     # Angle Theta
 
         self.integral_errors() # call integral_errors after receiving new message 
 
