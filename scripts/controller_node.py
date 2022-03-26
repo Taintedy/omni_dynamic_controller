@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import warnings
+import numpy as np
 import rospy
 from std_msgs.msg import String
 from geometry_msgs.msg import TransformStamped, PoseArray, Pose, Quaternion, PoseStamped, PoseWithCovarianceStamped, \
@@ -22,7 +23,16 @@ class ControllerNode(object):
         data = "0 9"
         self.pub_stm_command.publish(data)
 
+    def LQR(self):
+        self.K_fsfb = np.genfromtxt('K_fsf.csv', delimiter=',')
+        self.K_int = np.genfromtxt('K_int.csv', delimiter=',')
 
+    def integrals(self):
+        msg = 
+        self.X_int += msg.pose.pose.position.x
+        self.Y_int += msg.pose.pose.position.y
+
+        
 def shutdown():
     rospy.logwarn("Controller shutting down")
 
