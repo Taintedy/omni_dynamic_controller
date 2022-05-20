@@ -14,6 +14,24 @@ RATE_get_local_robot_speed = 50
 RATE_publish_control = 50
 
 
+def cvt_global2local(global_point, src_point):
+    size = global_point.shape[-1]
+    x1, y1, a1 = 0, 0, 0
+    if size == 3:
+        x1, y1, a1 = global_point.T
+    elif size == 2:
+        x1, y1 = global_point.T
+    X, Y, A = src_point.T
+    x = x1 * np.cos(A) + y1 * np.sin(A) - X * np.cos(A) - Y * np.sin(A)
+    y = -x1 * np.sin(A) + y1 * np.cos(A) + X * np.sin(A) - Y * np.cos(A)
+    a = (a1 - A + np.pi) % (2 * np.pi) - np.pi
+    if size == 3:
+        return np.array([x, y, a]).T
+    elif size == 2:
+        return np.array([x, y]).T
+    else:
+        return
+
 def wrap_angle(angle):
     return (angle + np.pi) % (2 * np.pi) - np.pi
 
@@ -75,15 +93,34 @@ class ControllerNode(object):
 
         # Current goal
 
+        # deviation
+        self.x_dev_err = 0
+        self.y_dev_err = 0
+        self.theta_dev_err = 0
+        self.vx_dev_err = 0
+        self.vy_dev_err = 0
+        self.w_dev_err = 0
+
         # Global system
         self.x_target_global = 1
         self.y_target_global = 0
         self.theta_target_global = 0
 
         # Local system
-        self.x_goal_local = 0
-        self.y_goal_local = 0
-        self.theta_goal_local = np.pi / 2
+        self.x_goal_local = 1
+        self.y_goal_local = -0.2
+        self.theta_goal_local = 0
+
+        self.goals = np.array([[1, -0.2, np.pi],
+                               [0, 0, np.pi],
+                               [0, 0, 0],
+                               [2, 0.3, 0],
+                               [2, 0.3, np.pi/2],
+                               [1, -0.3, np.pi/2],
+                               [1, 0.3, 0],
+                               [0, 0, 0]])
+
+        self.cnt = 0
 
         # Integrals initialization
         self.x_err_int = 0  # Возможно нужно перевести все в локальную систему координат либо изменить начальные условия на текущую координату
@@ -146,7 +183,7 @@ class ControllerNode(object):
         try:
             trans = self.tfBuffer.lookup_transform("secondary_robot_odom", 'secondary_robot', rospy.Time())
             self.x_local = trans.transform.translation.x
-            self.y_local = 0 #trans.transform.translation.y
+            self.y_local = -trans.transform.translation.y
             q = [trans.transform.rotation.x, trans.transform.rotation.y, trans.transform.rotation.z,
                  trans.transform.rotation.w]
 
@@ -163,7 +200,8 @@ class ControllerNode(object):
         self.integral_errors()
         self.start = rospy.get_time()
         # Defines robot state at each time step
-        if self.Int_Err is not None and not self.flag:
+        # if self.Int_Err is not None and not self.flag:
+        if not self.flag:
 
             self.X = \
             np.array([self.x_local, self.y_local, self.theta_local, self.vx_local, self.vy_local, self.w_local])[
@@ -171,15 +209,23 @@ class ControllerNode(object):
 
             dist = np.sqrt((self.x_local - self.x_goal_local) ** 2 + (self.y_local - self.y_goal_local) ** 2)
             #
-            if dist <= 0.1 and abs(self.theta_local + self.theta_goal_local) <= np.pi / 10:
-                control_string = "0" + " 0x50 " + "0 0 0"
-                #rospy.logwarn("control cmd: %s" % control_string)
+            if dist <= 0.1 and abs(self.theta_goal_local - self.theta_local) < np.pi / 10:
+                control_string = "0" + " 0x08 " + "0 0 0"
+                rospy.logwarn("control cmd: %s" % control_string)
                 self.pub_stm_command.publish(control_string)
-
+                rospy.sleep(1/50 * 100)
                 self.Int_Err = np.array([[0],
                                          [0],
                                          [0]])
-                self.flag = True
+
+                if self.cnt <= self.goals.shape[0]:
+
+                    self.x_goal_local = self.goals[self.cnt, 0]
+                    self.y_goal_local = self.goals[self.cnt, 1]
+                    self.theta_goal_local = self.goals[self.cnt, 2]
+                    self.cnt += 1
+                else:
+                    self.flag = True
             else:
                 #rospy.logwarn("state X: %s %s %s %s %s %s" % (
                 #self.X.T[0, 0], self.X.T[0, 1], self.X.T[0, 2], self.X.T[0, 3], self.X.T[0, 4], self.X.T[0, 5]))
@@ -190,27 +236,47 @@ class ControllerNode(object):
                 self.state_pub_header.publish(state)
                 # Calculate control vector
                 # rospy.logwarn('K_int %s' % self.K_int)
-                Control_Int_Part = self.K_int @ self.Int_Err
-                Control_FSFB_Part = self.K_fsfb @ self.X
-                Control_Vector = Control_Int_Part - Control_FSFB_Part
+                # Control_Int_Part = self.K_int @ self.Int_Err
+                # Control_FSFB_Part = self.K_fsfb @ self.X
+                # Control_Vector = Control_Int_Part - Control_FSFB_Part
 
-                for i in range(3):
-                    if abs(Control_Vector[i]) > 0.3:
-                        Control_Vector[i] = np.sign(Control_Vector[i]) * 0.3
+                rospy.logwarn("vx %s" % self.vx_dev_err)
+                rospy.logwarn("x %s" % self.x_dev_err)
+
+                rospy.logwarn("vy %s" % self.vy_dev_err)
+                rospy.logwarn("y %s" % self.y_dev_err)
+
+                rospy.logwarn("w %s" % self.w_dev_err)
+                rospy.logwarn("theta %s" % self.theta_dev_err)
+
+
+
+                control_signal_vx = 0.80975 * self.x_dev_err - 0.06663 * self.vx_dev_err
+                control_signal_vy = -(0.80971 * self.y_dev_err + 0.06163 * self.vy_dev_err)
+                control_signal_w = 0.8094 * self.theta_dev_err - 0.03775 * self.w_dev_err
+
+
+                speed = np.array([[np.cos(self.theta_local), -np.sin(self.theta_local)],
+                                  [np.sin(self.theta_local), np.cos(self.theta_local)]]) @ np.array([[control_signal_vx], [control_signal_vy]])
+                control_signal_vx = speed[0, 0]
+                control_signal_vy = speed[1, 0]
+                # for i in range(3):
+                #     if abs(Control_Vector[i]) > 1:
+                #         Control_Vector[i] = np.sign(Control_Vector[i]) * 1
 
                 # Publish data to STM
                 control_string = "%f %f %f" % (
-                    Control_Vector.T[0][0], Control_Vector.T[0][1], Control_Vector.T[0][2])
-                #rospy.logwarn("control cmd: %s" % control_string)
+                    control_signal_vx, control_signal_vy, control_signal_w)
+                rospy.logwarn("control cmd: %s" % control_string)
 
-                control_string = "0" + " 0x50 " + control_string
+                control_string = "0" + " 0x08 " + control_string
                 self.pub_stm_command.publish(control_string)
                 self.pub_robot_command.publish(control_string)
-                int_error_string = "%f %f %f" % (self.Int_Err.T[0, 0], self.Int_Err.T[0, 1], self.Int_Err.T[0, 2])
-                self.pub_int_error.publish(int_error_string)
+                # int_error_string = "%f %f %f" % (self.Int_Err.T[0, 0], self.Int_Err.T[0, 1], self.Int_Err.T[0, 2])
+                # self.pub_int_error.publish(int_error_string)
 
         else:
-            control_string = "0" + " 0x50 " + "0 0 0"
+            control_string = "0" + " 0x08 " + "0 0 0"
             #rospy.logwarn("control cmd: %s" % control_string)
             self.pub_stm_command.publish(control_string)
 
@@ -295,17 +361,20 @@ class ControllerNode(object):
 
     def integral_errors(self):
         # Calculate deviation between goal and current measurement
-        x_dev_err = self.x_goal_local - self.x_local
-        y_dev_err = self.y_goal_local - self.y_local
-        theta_dev_err = self.theta_goal_local - self.theta_local
+        self.x_dev_err = self.x_goal_local - self.x_local
+        self.y_dev_err = self.y_goal_local - self.y_local
+        self.theta_dev_err = self.theta_goal_local - self.theta_local
+        self.vx_dev_err = -self.vx_local
+        self.vy_dev_err = -self.vy_local
+        self.w_dev_err = -self.w_local
         # Integrals Data
-        self.x_err_int += x_dev_err  # Intergal of Position Error X
-        self.y_err_int += y_dev_err  # Intergal of Position Error Y
-        self.theta_err_int += theta_dev_err  # Intergal of Angle Error Theta
+        # self.x_err_int += x_dev_err  # Intergal of Position Error X
+        # self.y_err_int += y_dev_err  # Intergal of Position Error Y
+        # self.theta_err_int += theta_dev_err  # Intergal of Angle Error Theta
         # Assign column vector of integral errors  
-        self.Int_Err = np.array([[self.x_err_int],
-                                 [self.y_err_int],
-                                 [self.theta_err_int]])
+        # self.Int_Err = np.array([[self.x_err_int],
+        #                          [self.y_err_int],
+        #                          [self.theta_err_int]])
 
     def callback_odometry(self, data):
         rospy.logwarn("odometry!")
@@ -319,7 +388,7 @@ class ControllerNode(object):
 
 
 def shutdown():
-    control_string = "0" + " 0x50 " + "0 0 0"
+    control_string = "0" + " 0x08 " + "0 0 0"
     controller_node.pub_stm_command.publish(control_string)
     rospy.logwarn("Controller shutting down")
 
