@@ -107,18 +107,15 @@ class ControllerNode(object):
         self.theta_target_global = 0
 
         # Local system
-        self.x_goal_local = 1
-        self.y_goal_local = -0.2
-        self.theta_goal_local = 0
-
-        self.goals = np.array([[1, -0.2, np.pi],
-                               [0, 0, np.pi],
-                               [0, 0, 0],
-                               [2, 0.3, 0],
-                               [2, 0.3, np.pi/2],
-                               [1, -0.3, np.pi/2],
-                               [1, 0.3, 0],
-                               [0, 0, 0]])
+        angle = np.linspace(np.pi, 3*np.pi, 150)
+        x = (0.5 * 2 ** 0.5 * np.cos(angle)) / (1 + np.sin(angle) ** 2) + 1.5
+        y = (0.5 * 2 ** 0.5 * np.cos(angle) * np.sin(angle)) / (1 + np.sin(angle) ** 2)
+        self.goals = np.array([x, y, 10*angle]).T
+        self.goals = np.append(self.goals, [[self.goals[0, 0], self.goals[0, 1], self.goals[-1, 2]]], axis=0)
+        self.goals = np.append(self.goals, [[0, 0, self.goals[-1, 2]]], axis=0)
+        self.x_goal_local = self.goals[0, 0]
+        self.y_goal_local = self.goals[0, 1]
+        self.theta_goal_local = self.goals[0, 2]
 
         self.cnt = 0
 
@@ -209,11 +206,10 @@ class ControllerNode(object):
 
             dist = np.sqrt((self.x_local - self.x_goal_local) ** 2 + (self.y_local - self.y_goal_local) ** 2)
             #
-            if dist <= 0.1 and abs(self.theta_goal_local - self.theta_local) < np.pi / 10:
+            if dist <= 0.1 and abs(self.theta_goal_local - self.theta_local) < np.pi / 2:
                 control_string = "0" + " 0x08 " + "0 0 0"
                 rospy.logwarn("control cmd: %s" % control_string)
                 self.pub_stm_command.publish(control_string)
-                rospy.sleep(1/50 * 100)
                 self.Int_Err = np.array([[0],
                                          [0],
                                          [0]])
@@ -240,24 +236,26 @@ class ControllerNode(object):
                 # Control_FSFB_Part = self.K_fsfb @ self.X
                 # Control_Vector = Control_Int_Part - Control_FSFB_Part
 
-                rospy.logwarn("vx %s" % self.vx_dev_err)
-                rospy.logwarn("x %s" % self.x_dev_err)
-
-                rospy.logwarn("vy %s" % self.vy_dev_err)
-                rospy.logwarn("y %s" % self.y_dev_err)
-
-                rospy.logwarn("w %s" % self.w_dev_err)
-                rospy.logwarn("theta %s" % self.theta_dev_err)
-
-
-
-                control_signal_vx = 0.80975 * self.x_dev_err - 0.06663 * self.vx_dev_err
-                control_signal_vy = -(0.80971 * self.y_dev_err + 0.06163 * self.vy_dev_err)
-                control_signal_w = 0.8094 * self.theta_dev_err - 0.03775 * self.w_dev_err
+                # rospy.logwarn("vx %s" % self.vx_dev_err)
+                # rospy.logwarn("x %s" % self.x_dev_err)
+                #
+                # rospy.logwarn("vy %s" % self.vy_dev_err)
+                # rospy.logwarn("y %s" % self.y_dev_err)
+                #
+                # rospy.logwarn("w %s" % self.w_dev_err)
+                # rospy.logwarn("theta %s" % self.theta_dev_err)
 
 
-                speed = np.array([[np.cos(self.theta_local), -np.sin(self.theta_local)],
-                                  [np.sin(self.theta_local), np.cos(self.theta_local)]]) @ np.array([[control_signal_vx], [control_signal_vy]])
+
+                control_signal_vx = 0.80975 * self.x_dev_err * 2.5 - 0.06663 * self.vx_dev_err * 1.5
+                control_signal_vy = -(0.80971 * self.y_dev_err * 2.5 + 0.06163 * self.vy_dev_err * 1.5)
+                control_signal_w = 0.8094 * self.theta_dev_err * 2.5 - 0.03775 * self.w_dev_err * 1.5
+
+
+                speed = np.array([[np.cos(self.theta_local), np.sin(self.theta_local)],
+                                  [-np.sin(self.theta_local), np.cos(self.theta_local)]]) @ np.array([[control_signal_vx], [control_signal_vy]])
+
+                rospy.logwarn("goal %s %s %s" % (self.x_goal_local, self.y_goal_local, self.theta_goal_local) )
                 control_signal_vx = speed[0, 0]
                 control_signal_vy = speed[1, 0]
                 # for i in range(3):
@@ -267,7 +265,7 @@ class ControllerNode(object):
                 # Publish data to STM
                 control_string = "%f %f %f" % (
                     control_signal_vx, control_signal_vy, control_signal_w)
-                rospy.logwarn("control cmd: %s" % control_string)
+                # rospy.logwarn("control cmd: %s" % control_string)
 
                 control_string = "0" + " 0x08 " + control_string
                 self.pub_stm_command.publish(control_string)
