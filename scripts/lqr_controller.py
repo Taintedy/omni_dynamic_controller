@@ -96,9 +96,8 @@ class ControllerNode(object):
                 state.stamp = rospy.Time.now()
 
                 state.frame_id = "%s %s %s %s %s %s" % (
-                    self.robot_state[0], self.robot_state[1],
-                    self.robot_state[2], self.robot_state[3],
-                    self.robot_state[4], self.robot_state[5])
+                    self.robot_state[0], self.robot_state[1], self.robot_state[2],
+                    self.robot_state[3], self.robot_state[4], self.robot_state[5])
 
                 self.state_pub_header.publish(state)
                 control_signal = self.get_control_signal(pose_dev)
