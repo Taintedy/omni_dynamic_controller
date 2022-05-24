@@ -46,26 +46,30 @@ class MPC_Controller(object):
         self.flag = False  # End of path flag
 
         # Target global point to reach
-        x_ref = 1
-        y_ref = -0.5
-        theta_ref = np.pi
+
 
         # Creating path vosmerka
-        angle = np.linspace(np.pi, 3 * np.pi, 150)
+        angle = np.linspace(np.pi, 3 * np.pi, 50)
         x = (0.5 * 2 ** 0.5 * np.cos(angle)) / (1 + np.sin(angle) ** 2) + 1.5
         y = (0.5 * 2 ** 0.5 * np.cos(angle) * np.sin(angle)) / (1 + np.sin(angle) ** 2)
-        self.path = np.array([[x_ref, y_ref, theta_ref],
-                              [1, 0, 0],
-                              [0, 0, 0]])
-        # self.path = np.array([x, y, angle]).T
-        # self.path = np.append(self.path, [[self.path[0, 0], self.path[0, 1], self.path[-1, 2]]], axis=0)
-        # self.path = np.append(self.path, [[0, 0, self.path[-1, 2]]], axis=0)
+        # self.path = np.array([[0.5, 0, 0],
+        #                       [0.5, 0.15, np.pi/2],
+        #                       [1.5, 0.15, np.pi],
+        #                       [1.5, -0.15, 3 * np.pi / 2],
+        #                       [0.5, -0.15, 2 * np.pi],
+        #                       [0.5, 0, 2* np.pi],
+        #                       [0, 0, 2*np.pi]])
+
+        self.path = np.array([x, y, 10*angle]).T
+        self.path = np.append(self.path, [[self.path[0, 0], self.path[0, 1], self.path[-1, 2]]], axis=0)
+        self.path = np.append(self.path, [[0, 0, self.path[-1, 2]]], axis=0)
 
         self.current_goal = self.path[0]
+        # self.current_speed_goal = self.speed_path[0]
         self.cnt = 0
 
         # do-mpc: Start ----------------------------------------------------
-        RATE = 20  # Rate of the system [Hz]
+        RATE = 10  # Rate of the system [Hz]
 
         # Step 1. Creating model of the system
         model_type = 'continuous'
@@ -82,10 +86,18 @@ class MPC_Controller(object):
         Vx = model.set_variable(var_type='_x', var_name='Vx', shape=(1, 1))
         Vy = model.set_variable(var_type='_x', var_name='Vy', shape=(1, 1))
         W = model.set_variable(var_type='_x', var_name='W', shape=(1, 1))
+
+        # path points
+        x_ref = model.set_variable(var_type='_tvp', var_name='x_ref')
+        y_ref = model.set_variable(var_type='_tvp', var_name='y_ref')
+        theta_ref = model.set_variable(var_type='_tvp', var_name='theta_ref')
+
         # Set model parameters of the equations
         Tvx = model.set_variable('parameter', 'Tvx')
         Tvy = model.set_variable('parameter', 'Tvy')
         Tw = model.set_variable('parameter', 'Tw')
+
+
         # Right-hand side of the equations
         model.set_rhs('x', Vx)
         model.set_rhs('y', Vy)
@@ -101,20 +113,23 @@ class MPC_Controller(object):
         # Step 2. Configuring MPC Controller
         mpc = do_mpc.controller.MPC(model)
         setup_mpc = {
-            'n_horizon': 9,
+            'n_horizon': 20,
             't_step': 1 / RATE,
-            'n_robust': 2,
+            'n_robust': 1,
         }
         mpc.set_param(**setup_mpc)
         # Objective cost function
-        mterm = (x_ref - x) ** 2 + (y_ref - y) ** 2 + (theta_ref - theta) ** 2
-        lterm = (x_ref - x) ** 2 + (y_ref - y) ** 2 + (theta_ref - theta) ** 2
+        lterm = (self.model.tvp['x_ref'] - self.model.x['x']) ** 2 + (
+                        self.model.tvp['y_ref'] - self.model.x['y']) ** 2 + (
+                                self.model.tvp['theta_ref'] - self.model.x['theta']) ** 2
+        # lterm = (0.2 - self.model.x['Vx']) ** 2 + (0 - self.model.x['Vy']) ** 2 + (0 - self.model.x['W']) ** 2
+        mterm = lterm
         mpc.set_objective(mterm=mterm, lterm=lterm)
         # Penalty for using actuators
         mpc.set_rterm(
-            Vx_set = 1,
-            Vy_set = 1,
-            W_set = 1,
+            Vx_set=10,
+            Vy_set=10,
+            W_set=10,
         )
         # Setup bounds
         # Lower bounds on inputs
@@ -135,6 +150,19 @@ class MPC_Controller(object):
             Tvy=dynamics_Vy,
             Tw=dynamics_W
         )
+
+        # set point to go to
+        tvp_template = mpc.get_tvp_template()
+
+        def tvp_fun(t_now):
+            for k in range(setup_mpc['n_horizon'] + 1):
+                tvp_template['_tvp', k, 'x_ref'] = self.current_goal[0]
+                tvp_template['_tvp', k, 'y_ref'] = self.current_goal[1]
+                tvp_template['_tvp', k, 'theta_ref'] = self.current_goal[2]
+            return tvp_template
+
+        mpc.set_tvp_fun(tvp_fun)
+
         # Controller setup
         mpc.setup()
         # Set initial position
@@ -142,10 +170,12 @@ class MPC_Controller(object):
         mpc.x0 = x0
         # Set initial guess
         mpc.set_initial_guess()
+
         # Copy mpc as the field of the class instance
         self.mpc = mpc
+
         # do-mpc: End ------------------------------------------------------
-        rospy.logwarn("end mpc")
+        #rospy.logwarn("end mpc")
         # ROS: Start -------------------------------------------------------
         # Tf listener for localization
         self.tfBuffer = tf2_ros.Buffer()
@@ -179,17 +209,15 @@ class MPC_Controller(object):
         pose_dev = self.calc_errors()
         if not self.flag:
             if self.is_near_goal():
-                control_string = "0" + " 0x08 " + "0 0 0"
-                rospy.logwarn("got to goal")
-                self.pub_stm_command.publish(control_string)
+                # control_string = "0" + " 0x08 " + "0 0 0"
+                # #rospy.logwarn("got to goal")
+                # self.pub_stm_command.publish(control_string)
 
-                if self.cnt <= self.path.shape[0]:
+                if self.cnt < self.path.shape[0] - 1:
                     self.cnt += 1
                     self.current_goal = self.path[self.cnt]
-                    rospy.logwarn(self.robot_state)
-                    # mterm = (self.current_goal[0] - self.model.) ** 2 + (self.current_goal[1] - self.model.y) ** 2 + (self.current_goal[2] - self.model) ** 2
-                    # lterm = (self.current_goal[0] - self.robot_state[0]) ** 2 + (self.current_goal[1] - self.robot_state[1]) ** 2 + (self.current_goal[2] - self.robot_state[2]) ** 2
-                    # self.mpc.set_objective(mterm=mterm, lterm=lterm)
+                    # self.current_speed_goal = self.speed_path[self.cnt]
+                    #rospy.logwarn(self.robot_state)
                 else:
                     self.flag = True
             else:
@@ -198,12 +226,13 @@ class MPC_Controller(object):
                 state.frame_id = "%s %s %s %s %s %s" % (
                     self.robot_state[0], self.robot_state[1], self.robot_state[2],
                     self.robot_state[3], self.robot_state[4], self.robot_state[5])
+                rospy.logwarn(self.robot_state[3])
                 self.state_pub_header.publish(state)
                 control_signal = self.get_control_signal(self.robot_state[np.newaxis].T)
 
                 # Publish data to STM
                 control_string = "%f %f %f" % (control_signal[0], control_signal[1], control_signal[2])
-                rospy.logwarn("Goal %s" % self.current_goal)
+                #rospy.logwarn("Goal %s" % self.current_goal)
                 control_string = "0" + " 0x08 " + control_string
                 self.pub_stm_command.publish(control_string)
                 self.pub_robot_command.publish(control_string)
@@ -228,7 +257,7 @@ class MPC_Controller(object):
         dist = np.sqrt(
             (self.robot_state[0] - self.current_goal[0]) ** 2 + (self.robot_state[1] - self.current_goal[1]) ** 2)
         theta_err = abs(self.robot_state[2] - self.current_goal[2])
-        return dist <= 0.1 and theta_err < np.pi / 20
+        return dist <= 0.3 and theta_err < np.pi / 20
 
     def callback_response(self, data):
         """Function parses data from STM into robot local frame speed data.
@@ -253,8 +282,8 @@ class MPC_Controller(object):
                 speed_vals = [float(token) for token in splitted_data]
 
                 self.robot_state = np.array(
-                    [trans.transform.translation.x, trans.transform.translation.y, unfolded_angle, speed_vals[0],
-                     speed_vals[1], speed_vals[2]])
+                    [trans.transform.translation.x, trans.transform.translation.y, unfolded_angle, speed_vals[1],
+                     speed_vals[2], speed_vals[3]])
             except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
                 rospy.logwarn("Failed to get localization from PF")
 
@@ -290,9 +319,9 @@ if __name__ == '__main__':
         rospy.on_shutdown(shutdown)
         rospy.init_node('MPC_controller_node', anonymous=True)
         warnings.filterwarnings("error")
-        rospy.logwarn("!!!!!!!!!!!!!!!!!!!start mpc!!!!!!!!!!!!!!!!!!!!!!!!!")
+        #rospy.logwarn("!!!!!!!!!!!!!!!!!!!start mpc!!!!!!!!!!!!!!!!!!!!!!!!!")
         controller_node = MPC_Controller()
-        rospy.logwarn("Controller created")
+        #rospy.logwarn("Controller created")
         rospy.spin()
     except rospy.ROSInterruptException:
         pass

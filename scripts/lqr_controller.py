@@ -82,11 +82,11 @@ class ControllerNode(object):
         pose_dev = self.calc_errors()
         if not self.flag:
             if self.is_near_goal():
-                control_string = "0" + " 0x08 " + "0 0 0"
-                rospy.logwarn("got to goal")
-                self.pub_stm_command.publish(control_string)
+                # control_string = "0" + " 0x08 " + "0 0 0"
+                # rospy.logwarn("got to goal")
+                # self.pub_stm_command.publish(control_string)
 
-                if self.cnt <= self.path.shape[0]:
+                if self.cnt < self.path.shape[0] - 1:
                     self.cnt += 1
                     self.current_goal = self.path[self.cnt]
                 else:
@@ -165,8 +165,8 @@ class ControllerNode(object):
                 speed_vals = [float(token) for token in splitted_data]
 
                 self.robot_state = np.array(
-                    [trans.transform.translation.x, trans.transform.translation.y, unfolded_angle, speed_vals[0],
-                     speed_vals[1], speed_vals[2]])
+                    [trans.transform.translation.x, trans.transform.translation.y, unfolded_angle, speed_vals[1],
+                     speed_vals[2], speed_vals[3]])
             except (tf2_ros.LookupException, tf2_ros.ConnectivityException, tf2_ros.ExtrapolationException):
                 rospy.logwarn("Failed to get localization from PF")
 
